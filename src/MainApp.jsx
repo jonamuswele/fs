@@ -10,7 +10,7 @@ import {
 // Blue:   #1d9cd3  (SOLUTIONS LTD)
 // Yellow: #f5c518  (dot accents)
 
-import { getNodes, getHistory } from "./api";
+import { getNodes, getHistory, getCrops, saveCrop, registerNode } from "./api";
 import { fetchWeatherForecast } from "./services/weatherService";
 import MapLocationPicker from "./components/MapLocationPicker";
 import CropDetailsPage from "./components/CropDetailsPage";
@@ -1754,26 +1754,52 @@ function CropsTab({ nodes, customCrops, setCustomCrops }) {
   };
 
   // Add new node
-  const addNewNode = () => {
+  const addNewNode = async () => {
     if (!newNode.id || !newNode.crop) {
       alert("Please provide at least a Node ID and Crop Type.");
       return;
     }
+
+    const cropPayload = {
+      crop: newNode.crop,
+      planted: newNode.planted || new Date().toISOString().split('T')[0],
+      notes: newNode.notes || "Newly registered node",
+      location: newNode.location || {
+        lat: -2.2472,
+        lng: 28.8042,
+        name: "Lwiro Agro Station, DR Congo"
+      }
+    };
     
-    // Add to custom crops
+    // 1. Add to custom crops in state
     setCustomCrops(prev => ({
       ...prev,
-      [newNode.id]: {
-        crop: newNode.crop,
-        planted: newNode.planted || new Date().toISOString().split('T')[0],
-        notes: newNode.notes || "Newly registered node",
-        location: newNode.location || {
-          lat: -2.2472,
-          lng: 28.8042,
-          name: "Lwiro Agro Station, DR Congo"
-        }
-      }
+      [newNode.id]: cropPayload
     }));
+
+    // 2. Persist directly to database (node + crop location)
+    try {
+      await registerNode({
+        node_id: newNode.id,
+        mac: newNode.mac || null,
+        farm_id: "FSL-001",
+        label: `${newNode.crop} Sensor`
+      });
+
+      await saveCrop({
+        node_id: newNode.id,
+        farm_id: "FSL-001",
+        crop: cropPayload.crop,
+        planted: cropPayload.planted,
+        notes: cropPayload.notes,
+        lat: cropPayload.location.lat,
+        lng: cropPayload.location.lng,
+        location_name: cropPayload.location.name,
+        area_ha: 0.5
+      });
+    } catch (err) {
+      console.warn("Database save warning:", err);
+    }
     
     setShowAddNode(false);
     setNewNode({ 
@@ -1812,11 +1838,27 @@ function CropsTab({ nodes, customCrops, setCustomCrops }) {
         growthAnalysis={gAnalysis}
         nodeColor={getNodeColor(selectedCropNodeId)}
         onBack={() => setSelectedCropNodeId(null)}
-        onUpdateCrop={(updatedCrop) => {
+        onUpdateCrop={async (updatedCrop) => {
           setCustomCrops(prev => ({
             ...prev,
             [selectedCropNodeId]: updatedCrop
           }));
+
+          // Persist updated crop details & location to the database
+          try {
+            await saveCrop({
+              node_id: selectedCropNodeId,
+              farm_id: "FSL-001",
+              crop: updatedCrop.crop,
+              planted: updatedCrop.planted,
+              notes: updatedCrop.notes,
+              lat: updatedCrop.location?.lat,
+              lng: updatedCrop.location?.lng,
+              location_name: updatedCrop.location?.name,
+            });
+          } catch (err) {
+            console.warn("Database crop update warning:", err);
+          }
         }}
       />
     );
@@ -2667,14 +2709,37 @@ export default function MainApp() {
     let active = true;
     const poll = async () => {
       try {
-        const [nodesData, histData] = await Promise.all([
+        const [nodesData, histData, cropsData] = await Promise.all([
           getNodes(),
-          getHistory(48)
+          getHistory(48),
+          getCrops()
         ]);
         if (active) {
           setNodes(Array.isArray(nodesData) ? nodesData : []);
           setHistory(Array.isArray(histData) ? histData : []);
           setLast(new Date());
+
+          // If crops were returned from the database, merge them into customCrops
+          if (Array.isArray(cropsData) && cropsData.length > 0) {
+            setCustomCrops(prev => {
+              const updated = { ...prev };
+              for (const c of cropsData) {
+                if (c.node_id) {
+                  updated[c.node_id] = {
+                    crop: c.crop,
+                    planted: c.planted,
+                    notes: c.notes || updated[c.node_id]?.notes || "",
+                    location: {
+                      lat: c.lat !== null && c.lat !== undefined ? c.lat : (updated[c.node_id]?.location?.lat ?? -2.2472),
+                      lng: c.lng !== null && c.lng !== undefined ? c.lng : (updated[c.node_id]?.location?.lng ?? 28.8042),
+                      name: c.location_name || updated[c.node_id]?.location?.name || "Field Location"
+                    }
+                  };
+                }
+              }
+              return updated;
+            });
+          }
         }
       } catch(e) { console.error("Poll error:", e); }
     };
