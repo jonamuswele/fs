@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "future-solutions-farm",
+  "main": "worker/index.js",
+  "compatibility_date": "2025-03-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "fs_db",
+      "database_id": "adcfdf1e-5cdb-48a2-ac21-06c3e69101a4"
+    }
+  ],
+  "vars": {
+    "DEFAULT_API_KEY": "fsl_live_7a9f8b2c4e1d6a0e"
+  }
+}
