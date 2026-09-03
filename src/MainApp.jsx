@@ -10,7 +10,10 @@ import {
 // Blue:   #1d9cd3  (SOLUTIONS LTD)
 // Yellow: #f5c518  (dot accents)
 
-import { getNodes, getHistory } from "./api";
+import { getNodes, getHistory, getCrops, saveCrop, registerNode, getApiBaseUrl, setApiBaseUrl, testApiConnection } from "./api";
+import { fetchWeatherForecast } from "./services/weatherService";
+import MapLocationPicker from "./components/MapLocationPicker";
+import CropDetailsPage from "./components/CropDetailsPage";
 
 // ── Future Solutions Ltd Brand Colors ────────────────────────────────────
 // Green:  #1a9c3e  (FUTURE)
@@ -30,16 +33,6 @@ const NODE_COLORS = {
 const getNodeColor = (nodeId, index = 0) => {
   return NODE_COLORS[nodeId] || PALETTE[index % PALETTE.length];
 };
-
-const WEATHER_FORECAST = [
-  { day: "Today",    icon: "☀️",  high: 28, low: 18, rain: 0,  humidity: 55, wind: 12 },
-  { day: "Tomorrow", icon: "⛅",  high: 25, low: 16, rain: 20, humidity: 68, wind: 18 },
-  { day: "Wed",      icon: "🌧️", high: 22, low: 15, rain: 80, humidity: 82, wind: 22 },
-  { day: "Thu",      icon: "🌦️", high: 24, low: 16, rain: 40, humidity: 70, wind: 15 },
-  { day: "Fri",      icon: "☀️",  high: 27, low: 17, rain: 5,  humidity: 52, wind: 10 },
-  { day: "Sat",      icon: "☀️",  high: 29, low: 19, rain: 0,  humidity: 48, wind: 8  },
-  { day: "Sun",      icon: "⛅",  high: 26, low: 17, rain: 15, humidity: 62, wind: 14 },
-];
 
 const MOISTURE_THRESHOLD = 40;
 
@@ -534,6 +527,36 @@ const css = `
     padding: 20px;
     position: relative;
     overflow: hidden;
+  }
+
+  .crop-card-aesthetic {
+    background: #ffffff;
+    border: 1.5px solid var(--border);
+    border-radius: 16px;
+    padding: 20px 22px;
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+  }
+
+  .crop-card-aesthetic:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 28px rgba(26, 156, 62, 0.12);
+    border-color: var(--green);
+  }
+
+  .crop-card-aesthetic:hover .view-cta-arrow {
+    transform: translateX(4px);
+  }
+
+  .view-cta-arrow {
+    transition: transform 0.2s ease;
+    display: inline-block;
   }
 
   .crop-top-bar {
@@ -1544,6 +1567,25 @@ const DEFAULT_GROWTH_STAGES = [
   { name: "Maturation", daysRange: [91, 120], icon: "🌾", description: "Harvest ready", actions: ["Reduce water", "Prepare harvest"] }
 ];
 
+const CROP_EMOJIS = {
+  Maize: "🌽",
+  Wheat: "🌾",
+  Rice: "🍚",
+  Tomato: "🍅",
+  Cassava: "🌿",
+  Yam: "🥔",
+  Pepper: "🌶️",
+  Groundnut: "🥜",
+  Sorghum: "🌾",
+  Soybean: "🌱",
+  Okra: "🥗",
+  Spinach: "🥬",
+  Cabbage: "🥬",
+  Onion: "🧅",
+  Garlic: "🧄",
+  Other: "🌱",
+};
+
 const analyzeCropGrowth = (cropName, plantingDate, nodeHumidity, nodeTemp) => {
   if (!cropName || !plantingDate) return null;
   
@@ -1638,26 +1680,22 @@ const analyzeCropGrowth = (cropName, plantingDate, nodeHumidity, nodeTemp) => {
 };
 
 // ── TAB 3: Crops ──────────────────────────────────────────────────────────
-function CropsTab({ nodes }) {
-  // State for managing crops data
-  const [customCrops, setCustomCrops] = useState(() => {
-    try {
-      const saved = localStorage.getItem("fsl_custom_crops");
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
+function CropsTab({ nodes, customCrops, setCustomCrops, onToast }) {
+  const [selectedCropNodeId, setSelectedCropNodeId] = useState(null);
   const [showAddNode, setShowAddNode] = useState(false);
+  const [showMapPickerForNew, setShowMapPickerForNew] = useState(false);
   const [newNode, setNewNode] = useState({ 
     id: "", 
     mac: "", 
-    crop: "", 
-    planted: "", 
-    notes: "" 
+    crop: "Maize", 
+    planted: new Date().toISOString().split('T')[0], 
+    notes: "",
+    location: {
+      lat: -2.2472,
+      lng: 28.8042,
+      name: "Lwiro Agro Station, DR Congo"
+    }
   });
-
-  const getAllCropData = () => customCrops;
 
   const cropOptions = ["Maize", "Wheat", "Rice", "Tomato", "Cassava", "Yam", "Pepper",
     "Groundnut", "Sorghum", "Soybean", "Okra", "Spinach", "Cabbage", "Onion", "Garlic", "Other"];
@@ -1669,264 +1707,525 @@ function CropsTab({ nodes }) {
   };
 
   // Add new node
-  const addNewNode = () => {
+  const addNewNode = async () => {
     if (!newNode.id || !newNode.crop) {
-      alert("coming soon");
+      alert("Please provide at least a Node ID and Crop Type.");
       return;
     }
+
+    const cropPayload = {
+      crop: newNode.crop,
+      planted: newNode.planted || new Date().toISOString().split('T')[0],
+      notes: newNode.notes || "Newly registered node",
+      location: newNode.location || {
+        lat: -2.2472,
+        lng: 28.8042,
+        name: "Lwiro Agro Station, DR Congo"
+      }
+    };
     
-    // Add to custom crops
+    // 1. Add to custom crops in state
     setCustomCrops(prev => ({
       ...prev,
-      [newNode.id]: {
-        crop: newNode.crop,
-        planted: newNode.planted || new Date().toISOString().split('T')[0],
-        notes: newNode.notes || "Newly added node"
-      }
+      [newNode.id]: cropPayload
     }));
+
+    // 2. Persist directly to database (node + crop location)
+    try {
+      await registerNode({
+        node_id: newNode.id,
+        mac: newNode.mac || null,
+        farm_id: "FSL-001",
+        label: `${newNode.crop} Sensor`
+      });
+
+      await saveCrop({
+        node_id: newNode.id,
+        farm_id: "FSL-001",
+        crop: cropPayload.crop,
+        planted: cropPayload.planted,
+        notes: cropPayload.notes,
+        lat: cropPayload.location.lat,
+        lng: cropPayload.location.lng,
+        location_name: cropPayload.location.name,
+        area_ha: 0.5
+      });
+
+      if (onToast) onToast("✅ Crop & Sensor successfully saved to permanent database!", "success");
+    } catch (err) {
+      console.warn("Database save warning:", err);
+      if (onToast) onToast(`⚠️ Saved to browser cache only. Database note: ${err.message}`, "warning");
+    }
     
     setShowAddNode(false);
-    setNewNode({ id: "", mac: "", crop: "", planted: "", notes: "" });
+    setNewNode({ 
+      id: "", 
+      mac: "", 
+      crop: "Maize", 
+      planted: new Date().toISOString().split('T')[0], 
+      notes: "",
+      location: {
+        lat: -2.2472,
+        lng: 28.8042,
+        name: "Lwiro Agro Station, DR Congo"
+      }
+    });
   };
 
-  // Growth Analysis Component (display only)
-  const GrowthAnalysis = ({ node, cropData }) => {
-    const cropName = cropData.crop;
-    const plantingDate = cropData.planted;
-    const humidity = node.sensor_json?.humidity || 0;
-    const temp = node.sensor_json?.temp_c || 0;
-    
-    const analysis = analyzeCropGrowth(cropName, plantingDate, humidity, temp);
-    
-    if (!analysis) return null;
-    
-    return (
-      <div className="growth-stage-card">
-        <div className="stage-header">
-          <span className="stage-icon">{analysis.currentStage?.icon || "🌱"}</span>
-          <span className="stage-name">
-            {analysis.currentStage?.name || "Growing"} • {analysis.progressPercent}% complete
-          </span>
-        </div>
-        
-        <div className="progress-bar-container">
-          <div className="progress-bar-fill" style={{ width: `${analysis.progressPercent}%` }}></div>
-        </div>
-        
-        <div className="crop-metrics">
-          <div className="metric-chip">
-            📅 Age: {analysis.daysSincePlanting} days
-          </div>
-          <div className="metric-chip">
-            🚜 Matures in: {analysis.maturityDays} days
-          </div>
-          <div className="metric-chip">
-            🎯 Health: {analysis.health}
-          </div>
-          <div className="metric-chip">
-            🌡️ Soil: {temp}°C / {humidity}% RH
-          </div>
-        </div>
-        
-        {/* What you should be seeing */}
-        {analysis.expectedObservations.length > 0 && (
-          <>
-            <div style={{ fontSize: "11px", fontWeight: "700", marginTop: "8px", color: "var(--blue-dark)" }}>
-              🔍 What you should be seeing:
-            </div>
-            <ul className="observation-list">
-              {analysis.expectedObservations.map((obs, idx) => (
-                <li key={idx}>{obs}</li>
-              ))}
-            </ul>
-          </>
-        )}
-        
-        {/* Environmental Recommendations */}
-        {analysis.envRecommendations.length > 0 && (
-          <div style={{ marginTop: "8px" }}>
-            <div style={{ fontSize: "11px", fontWeight: "700", marginBottom: "4px", color: "var(--green-dark)" }}>
-              💡 Environmental Recommendations:
-            </div>
-            {analysis.envRecommendations.map((rec, idx) => (
-              <div key={idx} className="recommendation-tag">{rec}</div>
-            ))}
-          </div>
-        )}
-        
-        {/* Stage-specific actions */}
-        {analysis.currentStage?.actions && (
-          <div style={{ marginTop: "8px" }}>
-            <div style={{ fontSize: "11px", fontWeight: "700", marginBottom: "4px", color: "var(--blue-dark)" }}>
-              ⚡ Recommended Actions:
-            </div>
-            {analysis.currentStage.actions.map((action, idx) => (
-              <div key={idx} className="recommendation-tag" style={{ background: "rgba(29,156,211,0.1)" }}>
-                {action}
-              </div>
-            ))}
-          </div>
-        )}
-        
-        {/* Harvest Countdown */}
-        <div className={`harvest-countdown ${analysis.daysUntilHarvest < 14 ? 'urgent' : ''}`}>
-          {analysis.daysUntilHarvest === 0 ? (
-            "🌾 Ready for harvest today!"
-          ) : analysis.isOverdue ? (
-            "⚠️ OVERDUE - Harvest immediately!"
-          ) : (
-            <>
-              <strong>⏰ {analysis.daysUntilHarvest} days until harvest</strong>
-              <div style={{ fontSize: "10px", marginTop: "4px" }}>
-                Expected: {analysis.harvestDate.toLocaleDateString()}
-              </div>
-            </>
-          )}
-        </div>
-        
-        {/* Next Stage Preview */}
-        {analysis.nextStage && (
-          <div style={{ fontSize: "10px", marginTop: "8px", color: "var(--muted)", textAlign: "center" }}>
-            Next: {analysis.nextStage.icon} {analysis.nextStage.name} in {analysis.nextStage.daysRange[0] - analysis.daysSincePlanting} days
-          </div>
-        )}
-      </div>
+  // If a specific crop card is clicked: Open full dedicated CropDetailsPage ("where we see everything")
+  if (selectedCropNodeId && customCrops[selectedCropNodeId]) {
+    const activeNode = (nodes || []).find(n => n.node_id === selectedCropNodeId) || {
+      node_id: selectedCropNodeId,
+      active: true,
+      sensor_json: { temp_c: 24.5, humidity: 62.0, ec: 1.8 }
+    };
+    const cData = customCrops[selectedCropNodeId];
+    const gAnalysis = analyzeCropGrowth(
+      cData.crop,
+      cData.planted,
+      activeNode.sensor_json?.humidity || 55,
+      activeNode.sensor_json?.temp_c || 24
     );
-  };
-  
-  // Get all crop data (prepopulated + custom)
-  const allCropData = getAllCropData();
-  
+
+    return (
+      <CropDetailsPage
+        node={activeNode}
+        cropData={cData}
+        growthAnalysis={gAnalysis}
+        nodeColor={getNodeColor(selectedCropNodeId)}
+        onBack={() => setSelectedCropNodeId(null)}
+        onUpdateCrop={async (updatedCrop) => {
+          setCustomCrops(prev => ({
+            ...prev,
+            [selectedCropNodeId]: updatedCrop
+          }));
+
+          // Persist updated crop details & location to the database
+          try {
+            await saveCrop({
+              node_id: selectedCropNodeId,
+              farm_id: "FSL-001",
+              crop: updatedCrop.crop,
+              planted: updatedCrop.planted,
+              notes: updatedCrop.notes,
+              lat: updatedCrop.location?.lat,
+              lng: updatedCrop.location?.lng,
+              location_name: updatedCrop.location?.name,
+            });
+            if (onToast) onToast("✅ Crop details updated in Cloudflare database!", "success");
+          } catch (err) {
+            console.warn("Database crop update warning:", err);
+            if (onToast) onToast(`⚠️ Updated in browser cache only. Database note: ${err.message}`, "warning");
+          }
+        }}
+      />
+    );
+  }
+
+  // Only display crops that exist in database (customCrops)
+  const displayedNodeIds = Object.keys(customCrops || {});
+
+  const activeCropsList = displayedNodeIds
+    .map(id => {
+      const node = (nodes || []).find(n => n.node_id === id) || { node_id: id, active: true };
+      const cropData = customCrops[id];
+      return { node, cropData };
+    })
+    .filter(item => item.cropData);
+
   return (
     <div>
-      <div className="section-heading">Crop Growth Monitor</div>
-      <div className="section-desc">
-        Real-time crop development tracking with AI-powered recommendations
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", flexWrap: "wrap", gap: "12px" }}>
+        <div>
+          <div className="section-heading">Crop Growth & Location Monitor</div>
+          <div className="section-desc">
+            Sleek crop cards with hyper-local weather tracking and growth analysis. Click any card to inspect all details.
+          </div>
+        </div>
+
+        <button 
+          onClick={() => setShowAddNode(!showAddNode)}
+          style={{
+            background: "linear-gradient(135deg, #1a9c3e 0%, #157a30 100%)",
+            color: "white",
+            border: "none",
+            padding: "9px 20px",
+            borderRadius: "8px",
+            fontWeight: "700",
+            fontSize: "13px",
+            cursor: "pointer",
+            boxShadow: "0 2px 8px rgba(26,156,62,.25)",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px"
+          }}
+        >
+          <span>{showAddNode ? "−" : "+"}</span>
+          <span>{showAddNode ? "Cancel" : "Add Crop Node"}</span>
+        </button>
       </div>
-      
-      <div className="crop-grid">
-        {/* Show prepopulated nodes */}
-        {nodes.map(node => {
-          const cropData = allCropData[node.node_id];
-          if (!cropData) return null;
-          
-          const col = NODE_COLORS[node.node_id] || "#1a9c3e";
-          const ageDays = daysSince(cropData.planted);
-          const plantingDateFormatted = new Date(cropData.planted).toLocaleDateString();
-          const isCustomNode = customCrops[node.node_id] !== undefined;
-          
-          return (
-            <div key={node.node_id} className="crop-card">
-              <div className="crop-top-bar" style={{ background: col }} />
-              
-              {/* Header with Node Info */}
-              <div className="crop-card-header">
-                <div>
-                  <span className="crop-node-label">
-                    {node.node_id}
-                    {isCustomNode && (
-                      <span style={{ 
-                        marginLeft: "8px", 
-                        fontSize: "9px", 
-                        background: "var(--blue-pale)", 
-                        padding: "2px 6px", 
-                        borderRadius: "4px",
-                        color: "var(--blue-dark)"
-                      }}>
-                        CUSTOM
-                      </span>
-                    )}
-                  </span>
-                  <div style={{ fontSize: "10px", color: "var(--muted)", marginTop: "2px" }}>
-                    {cropData.notes}
-                  </div>
+
+      {/* Add New Node Form */}
+      {showAddNode && (
+        <div style={{ 
+          background: "white", 
+          padding: "24px", 
+          borderRadius: "14px",
+          border: "1.5px solid var(--border)",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.06)",
+          marginBottom: "28px"
+        }}>
+          <div style={{ fontWeight: "800", fontSize: "16px", color: "var(--green-dark)", marginBottom: "4px" }}>
+            ➕ Register New Field Node & Assign Crop
+          </div>
+          <div style={{ fontSize: "12px", color: "var(--muted)", marginBottom: "18px" }}>
+            Provide node hardware identifiers, crop profile, and set GPS coordinates for live weather.
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px", marginBottom: "20px" }}>
+            <div>
+              <label className="form-label">Node ID *</label>
+              <input 
+                type="text" 
+                className="form-input"
+                placeholder="e.g., NODE_05"
+                value={newNode.id}
+                onChange={e => setNewNode({...newNode, id: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="form-label">MAC Address</label>
+              <input 
+                type="text" 
+                className="form-input"
+                placeholder="xx:xx:xx:xx:xx:xx"
+                value={newNode.mac}
+                onChange={e => setNewNode({...newNode, mac: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="form-label">Initial Crop *</label>
+              <select 
+                className="form-select"
+                value={newNode.crop}
+                onChange={e => setNewNode({...newNode, crop: e.target.value})}
+              >
+                {cropOptions.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="form-label">Planting Date</label>
+              <input 
+                type="date" 
+                className="form-input"
+                value={newNode.planted}
+                onChange={e => setNewNode({...newNode, planted: e.target.value})}
+              />
+            </div>
+          </div>
+
+          {/* Location Picker Section for New Node */}
+          <div style={{
+            background: "var(--bg)",
+            padding: "16px",
+            borderRadius: "10px",
+            border: "1px solid var(--border)",
+            marginBottom: "20px"
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+              <div>
+                <div style={{ fontSize: "12px", fontWeight: "800", color: "var(--text)" }}>
+                  📍 Field Location: <span style={{ color: "var(--green-dark)" }}>{newNode.location.name}</span>
                 </div>
-                <span className={`node-badge ${node.active ? "online" : "offline"}`}>
-                  {node.active ? "ACTIVE" : "OFFLINE"}
-                </span>
+                <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "2px" }}>
+                  Lat: {newNode.location.lat.toFixed(4)} • Lng: {newNode.location.lng.toFixed(4)}
+                </div>
               </div>
-              
-              {/* Current sensor readings */}
-              <div style={{ 
-                background: "var(--bg)", 
-                padding: "10px", 
-                borderRadius: "8px", 
-                marginBottom: "16px",
-                display: "flex",
-                justifyContent: "space-around",
-                textAlign: "center"
-              }}>
-                <div>
-                  <div style={{ fontSize: "10px", color: "var(--muted)" }}>Soil Moisture</div>
-                  <div style={{ fontSize: "18px", fontWeight: "700", color: "var(--green)" }}>
-                    {node.sensor_json?.humidity?.toFixed(1)}%
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: "10px", color: "var(--muted)" }}>Temperature</div>
-                  <div style={{ fontSize: "18px", fontWeight: "700", color: "var(--blue)" }}>
-                    {node.sensor_json?.temp_c?.toFixed(1)}°C
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: "10px", color: "var(--muted)" }}>EC</div>
-                  <div style={{ fontSize: "18px", fontWeight: "700", color: "var(--text)" }}>
-                    {node.sensor_json?.ec?.toFixed(2)}
-                  </div>
-                </div>
+
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (navigator.geolocation) {
+                      navigator.geolocation.getCurrentPosition(
+                        (pos) => {
+                          setNewNode(prev => ({
+                            ...prev,
+                            location: {
+                              lat: Number(pos.coords.latitude.toFixed(5)),
+                              lng: Number(pos.coords.longitude.toFixed(5)),
+                              name: `Device GPS (${pos.coords.latitude.toFixed(3)}°, ${pos.coords.longitude.toFixed(3)}°)`
+                            }
+                          }));
+                        },
+                        (err) => alert("GPS Error: " + err.message)
+                      );
+                    }
+                  }}
+                  style={{
+                    background: "var(--blue-pale)",
+                    color: "var(--blue-dark)",
+                    border: "1px solid var(--blue-mid)",
+                    padding: "7px 14px",
+                    borderRadius: "6px",
+                    fontSize: "12px",
+                    fontWeight: "700",
+                    cursor: "pointer"
+                  }}
+                >
+                  📍 Use Live GPS
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowMapPickerForNew(true)}
+                  style={{
+                    background: "var(--green-pale)",
+                    color: "var(--green-dark)",
+                    border: "1px solid var(--green-mid)",
+                    padding: "7px 14px",
+                    borderRadius: "6px",
+                    fontSize: "12px",
+                    fontWeight: "700",
+                    cursor: "pointer"
+                  }}
+                >
+                  🗺️ Pick on Map
+                </button>
               </div>
-              
-              {/* Crop Information Display */}
-              <div style={{ 
-                display: "grid", 
-                gridTemplateColumns: "1fr 1fr", 
-                gap: "12px",
-                marginBottom: "16px",
-                padding: "12px",
-                background: "var(--green-pale)",
-                borderRadius: "8px"
-              }}>
-                <div>
-                  <div style={{ fontSize: "10px", color: "var(--muted)" }}>🌾 Crop</div>
-                  <div style={{ fontSize: "16px", fontWeight: "800", color: "var(--green-dark)" }}>
-                    {cropData.crop}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: "10px", color: "var(--muted)" }}>📅 Planted</div>
-                  <div style={{ fontSize: "13px", fontWeight: "600" }}>
-                    {plantingDateFormatted}
-                    <span style={{ fontSize: "11px", color: "var(--muted)", marginLeft: "6px" }}>
-                      ({ageDays} days ago)
+            </div>
+          </div>
+
+          <div style={{ marginBottom: "20px" }}>
+            <label className="form-label">Field Notes / Variety</label>
+            <input 
+              type="text" 
+              className="form-input"
+              placeholder="e.g., Yellow hybrid corn, drip irrigation zone A"
+              value={newNode.notes}
+              onChange={e => setNewNode({...newNode, notes: e.target.value})}
+            />
+          </div>
+
+          <button 
+            onClick={addNewNode}
+            style={{
+              width: "100%",
+              background: "var(--green)",
+              color: "white",
+              border: "none",
+              padding: "12px",
+              borderRadius: "8px",
+              fontWeight: "800",
+              fontSize: "14px",
+              cursor: "pointer",
+              boxShadow: "0 2px 8px rgba(26,156,62,.2)"
+            }}
+          >
+            Register Node & Add to Field
+          </button>
+        </div>
+      )}
+
+      {/* Abstracted Aesthetic Crop Cards Grid or Empty State */}
+      {activeCropsList.length === 0 ? (
+        <div className="card" style={{ textAlign: "center", padding: "50px 24px", marginBottom: "24px" }}>
+          <div style={{ fontSize: 38, marginBottom: 12 }}>🌱</div>
+          <div style={{ fontFamily: "Nunito,sans-serif", fontWeight: 800, fontSize: 17, color: "var(--text)" }}>
+            No crops registered in database yet
+          </div>
+          <div style={{ fontSize: 13, color: "var(--muted)", maxWidth: 480, margin: "8px auto 20px", lineHeight: 1.5 }}>
+            Only verified crops and locations saved in your database will appear here. Click "Add Crop Node" above to register your first sensor node, crop type, and map location.
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowAddNode(true)}
+            style={{
+              background: "linear-gradient(135deg, #1a9c3e 0%, #157a30 100%)",
+              color: "white",
+              border: "none",
+              padding: "10px 24px",
+              borderRadius: "8px",
+              fontWeight: "700",
+              fontSize: "13px",
+              cursor: "pointer",
+              boxShadow: "0 2px 8px rgba(26,156,62,.25)",
+            }}
+          >
+            + Register First Crop Node
+          </button>
+        </div>
+      ) : (
+        <div className="crop-grid">
+          {activeCropsList.map(({ node, cropData }) => {
+            const col = NODE_COLORS[node.node_id] || "#1a9c3e";
+            const ageDays = daysSince(cropData.planted);
+            const emoji = CROP_EMOJIS[cropData.crop] || "🌱";
+            const analysis = analyzeCropGrowth(
+              cropData.crop,
+              cropData.planted,
+              node.sensor_json?.humidity || 50,
+              node.sensor_json?.temp_c || 25
+            );
+
+            return (
+              <div 
+                key={node.node_id} 
+                className="crop-card-aesthetic"
+                onClick={() => setSelectedCropNodeId(node.node_id)}
+              >
+                <div className="crop-top-bar" style={{ background: col }} />
+
+                {/* Card Header: Node ID and Status Pill */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", marginTop: "4px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ fontWeight: "800", fontSize: "14px", color: "var(--text)" }}>
+                      {node.node_id}
                     </span>
                   </div>
+                  <span className={`node-badge ${node.active ? "online" : "offline"}`}>
+                    {node.active ? "ACTIVE" : "OFFLINE"}
+                  </span>
+                </div>
+
+                {/* Crop Hero Identity */}
+                <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
+                  <div style={{
+                    width: "48px",
+                    height: "48px",
+                    borderRadius: "12px",
+                    background: "var(--green-pale)",
+                    border: "1px solid var(--green-mid)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "26px",
+                    flexShrink: 0
+                  }}>
+                    {emoji}
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: "17px", fontWeight: "800", color: "var(--text)", lineHeight: "1.2" }}>
+                      {cropData.crop}
+                    </div>
+                    <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "2px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {cropData.notes || `Planted ${ageDays ?? 0} days ago`}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Location Badge */}
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  background: "var(--bg)",
+                  padding: "6px 10px",
+                  borderRadius: "8px",
+                  fontSize: "11px",
+                  color: "var(--muted)",
+                  marginBottom: "14px"
+                }}>
+                  <span>📍</span>
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontWeight: "600" }}>
+                    {cropData.location?.name || "Field Location"}
+                  </span>
+                </div>
+
+                {/* Compact Sensor Telemetry Vitals */}
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr 1fr",
+                  gap: "8px",
+                  background: "var(--bg)",
+                  padding: "10px",
+                  borderRadius: "10px",
+                  textAlign: "center",
+                  marginBottom: "14px"
+                }}>
+                  <div>
+                    <div style={{ fontSize: "9px", color: "var(--muted)", fontWeight: "700", textTransform: "uppercase" }}>Moisture</div>
+                    <div style={{ fontSize: "14px", fontWeight: "800", color: "var(--green)", marginTop: "2px" }}>
+                      {node.sensor_json?.humidity !== undefined ? `${node.sensor_json.humidity.toFixed(0)}%` : "--"}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "9px", color: "var(--muted)", fontWeight: "700", textTransform: "uppercase" }}>Temp</div>
+                    <div style={{ fontSize: "14px", fontWeight: "800", color: "var(--blue)", marginTop: "2px" }}>
+                      {node.sensor_json?.temp_c !== undefined ? `${node.sensor_json.temp_c.toFixed(0)}°C` : "--"}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "9px", color: "var(--muted)", fontWeight: "700", textTransform: "uppercase" }}>EC</div>
+                    <div style={{ fontSize: "14px", fontWeight: "800", color: "var(--text)", marginTop: "2px" }}>
+                      {node.sensor_json?.ec !== undefined ? node.sensor_json.ec.toFixed(1) : "--"}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sleek Stage Progress Bar */}
+                {analysis && (
+                  <div style={{ marginBottom: "14px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: "700", marginBottom: "4px" }}>
+                      <span style={{ color: "var(--green-dark)" }}>{analysis.currentStage?.icon} {analysis.currentStage?.name}</span>
+                      <span style={{ color: "var(--muted)" }}>{analysis.progressPercent}%</span>
+                    </div>
+                    <div style={{ height: "6px", background: "var(--divider)", borderRadius: "3px", overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${analysis.progressPercent}%`, background: "var(--green)", borderRadius: "3px" }} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Bottom Row: Harvest Countdown & Click Action */}
+                <div style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  paddingTop: "12px",
+                  borderTop: "1px solid var(--divider)"
+                }}>
+                  <span style={{
+                    fontSize: "11px",
+                    fontWeight: "700",
+                    color: analysis?.daysUntilHarvest < 14 ? "#a37a00" : "var(--muted)",
+                    background: analysis?.daysUntilHarvest < 14 ? "var(--yellow-pale)" : "transparent",
+                    padding: analysis?.daysUntilHarvest < 14 ? "2px 6px" : "0",
+                    borderRadius: "4px"
+                  }}>
+                    {analysis?.daysUntilHarvest === 0
+                      ? "🌾 Harvest today"
+                      : `⏰ ${analysis?.daysUntilHarvest || 0}d left`}
+                  </span>
+
+                  <span style={{
+                    fontSize: "12px",
+                    fontWeight: "800",
+                    color: "var(--green-dark)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px"
+                  }}>
+                    <span>View Details</span>
+                    <span className="view-cta-arrow">→</span>
+                  </span>
                 </div>
               </div>
-              
-              {/* Growth Analysis */}
-              <GrowthAnalysis node={node} cropData={cropData} />
-            </div>
-          );
-        })}
-      </div>
-      
-      {/* Field Summary Statistics */}
-      <div style={{ marginTop: "32px", padding: "24px", background: "var(--surface)", borderRadius: "12px", border: "1px solid var(--border)" }}>
-        <div style={{ fontWeight: "800", marginBottom: "20px", fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Field Summary Dashboard */}
+      <div style={{ marginTop: "32px", padding: "24px", background: "var(--surface)", borderRadius: "14px", border: "1px solid var(--border)" }}>
+        <div style={{ fontWeight: "800", marginBottom: "16px", fontSize: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
           📊 Field Summary Dashboard
         </div>
         
         {(() => {
-          const activeNodes = nodes.filter(n => allCropData[n.node_id]);
-          const uniqueCrops = [...new Set(activeNodes.map(n => allCropData[n.node_id]?.crop))];
-          const totalArea = activeNodes.length * 0.5;
-          
-          // Calculate harvest stats
-          const harvestStats = activeNodes.map(node => {
-            const cropData = allCropData[node.node_id];
-            const analysis = analyzeCropGrowth(cropData.crop, cropData.planted, 0, 0);
+          const uniqueCrops = [...new Set(activeCropsList.map(item => item.cropData.crop))];
+          const totalArea = activeCropsList.length * 0.5;
+          const harvestStats = activeCropsList.map(item => {
+            const analysis = analyzeCropGrowth(item.cropData.crop, item.cropData.planted, 0, 0);
             return {
-              node: node.node_id,
               daysToHarvest: analysis?.daysUntilHarvest || 0,
               isOverdue: analysis?.isOverdue || false,
               progress: analysis?.progressPercent || 0
@@ -1940,165 +2239,153 @@ function CropsTab({ nodes }) {
             : 0;
           
           return (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px" }}>
               <div className="metric-chip" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span>🌾 Active Crops:</span>
-                <strong style={{ fontSize: "14px" }}>{uniqueCrops.join(", ")}</strong>
+                <strong style={{ fontSize: "13px" }}>{uniqueCrops.join(", ") || "None"}</strong>
               </div>
               <div className="metric-chip" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span>📡 Planted Nodes:</span>
-                <strong style={{ fontSize: "14px" }}>{activeNodes.length}</strong>
+                <span>📡 Active Plots:</span>
+                <strong style={{ fontSize: "14px" }}>{activeCropsList.length}</strong>
               </div>
               <div className="metric-chip" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span>📐 Total Area:</span>
-                <strong style={{ fontSize: "14px" }}>{totalArea.toFixed(1)} hectares</strong>
+                <span>📐 Est. Total Area:</span>
+                <strong style={{ fontSize: "14px" }}>{totalArea.toFixed(1)} ha</strong>
               </div>
               <div className="metric-chip" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span>📈 Avg. Growth:</span>
-                <strong style={{ fontSize: "14px" }}>{avgProgress}% complete</strong>
+                <strong style={{ fontSize: "14px" }}>{avgProgress}%</strong>
               </div>
               {nearHarvest > 0 && (
                 <div className="metric-chip" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--yellow-pale)" }}>
                   <span>🚜 Near Harvest (14d):</span>
-                  <strong style={{ fontSize: "14px", color: "#9a7a00" }}>{nearHarvest} nodes</strong>
+                  <strong style={{ fontSize: "14px", color: "#9a7a00" }}>{nearHarvest} plots</strong>
                 </div>
               )}
               {overdue > 0 && (
                 <div className="metric-chip" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--red-pale)" }}>
                   <span>⚠️ Overdue Harvest:</span>
-                  <strong style={{ fontSize: "14px", color: "var(--red)" }}>{overdue} nodes</strong>
+                  <strong style={{ fontSize: "14px", color: "var(--red)" }}>{overdue} plots</strong>
                 </div>
               )}
             </div>
           );
         })()}
       </div>
-      
-      {/* Quick Status Legend */}
-      <div style={{ 
-        marginTop: "20px", 
-        padding: "16px", 
-        background: "var(--bg)", 
-        borderRadius: "8px",
-        fontSize: "11px",
-        color: "var(--muted)",
-        textAlign: "center"
-      }}>
-        💡 Data is automatically updated from field sensors. Growth stages are calculated based on crop type, 
-        planting date, and real-time environmental conditions.
-      </div>
-      
-      {/* Add New Node Section */}
-      <div className="add-node-section">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-          <div>
-            <div style={{ fontWeight: "800", fontSize: "16px", color: "var(--green-dark)" }}>
-              ➕ Add New Sensor Node
-            </div>
-            <div style={{ fontSize: "12px", color: "var(--muted)", marginTop: "4px" }}>
-              Register a new node in the field and assign crop immediately
-            </div>
-          </div>
-          <button 
-            onClick={() => setShowAddNode(!showAddNode)}
-            style={{
-              background: "var(--green)",
-              color: "white",
-              border: "none",
-              padding: "8px 20px",
-              borderRadius: "8px",
-              fontWeight: "700",
-              cursor: "pointer"
-            }}
-          >
-            {showAddNode ? "− Cancel" : "+ Add Node"}
-          </button>
-        </div>
-        
-        {showAddNode && (
-          <div style={{ 
-            background: "white", 
-            padding: "20px", 
-            borderRadius: "12px",
-            marginTop: "16px"
-          }}>
-            <div style={{ display: "grid", gap: "16px", marginBottom: "20px" }}>
-              <div>
-                <label className="form-label">Node ID *</label>
-                <input 
-                  type="text" 
-                  className="form-input"
-                  placeholder="e.g., NODE_05"
-                  value={newNode.id}
-                  onChange={e => setNewNode({...newNode, id: e.target.value})}
-                />
-              </div>
-              <div>
-                <label className="form-label">MAC Address</label>
-                <input 
-                  type="text" 
-                  className="form-input"
-                  placeholder="xx:xx:xx:xx:xx:xx"
-                  value={newNode.mac}
-                  onChange={e => setNewNode({...newNode, mac: e.target.value})}
-                />
-              </div>
-              <div>
-                <label className="form-label">Initial Crop *</label>
-                <select 
-                  className="form-select"
-                  value={newNode.crop}
-                  onChange={e => setNewNode({...newNode, crop: e.target.value})}
-                >
-                  <option value="">Select crop</option>
-                  {cropOptions.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="form-label">Planting Date</label>
-                <input 
-                  type="date" 
-                  className="form-input"
-                  value={newNode.planted}
-                  onChange={e => setNewNode({...newNode, planted: e.target.value})}
-                />
-              </div>
-              <div>
-                <label className="form-label">Notes</label>
-                <input 
-                  type="text" 
-                  className="form-input"
-                  placeholder="Optional notes about location, variety, etc."
-                  value={newNode.notes}
-                  onChange={e => setNewNode({...newNode, notes: e.target.value})}
-                />
-              </div>
-            </div>
-            <button 
-              onClick={addNewNode}
-              style={{
-                width: "100%",
-                background: "var(--blue)",
-                color: "white",
-                border: "none",
-                padding: "10px",
-                borderRadius: "8px",
-                fontWeight: "700",
-                cursor: "pointer"
-              }}
-            >
-              Register Node & Add to Dashboard
-            </button>
-          </div>
-        )}
-      </div>
+
+      {/* Modal for Picking Location when adding a new node */}
+      {showMapPickerForNew && (
+        <MapLocationPicker
+          initialLocation={newNode.location}
+          cropName={newNode.crop}
+          cropEmoji={CROP_EMOJIS[newNode.crop] || "🌱"}
+          onSave={(loc) => {
+            setNewNode(prev => ({ ...prev, location: loc }));
+            setShowMapPickerForNew(false);
+          }}
+          onClose={() => setShowMapPickerForNew(false)}
+        />
+      )}
     </div>
   );
 }
 
-// ── TAB 4: Weather ────────────────────────────────────────────────────────
-function WeatherTab({ history }) {
-  const rainDays = WEATHER_FORECAST.filter(d=>d.rain>=60);
+// ── TAB 4: Weather (Live Open-Meteo Integration) ──────────────────────────
+function WeatherTab({ history, nodes, customCrops }) {
+  const cropEntries = Object.entries(customCrops || {}).map(([nodeId, cropData]) => ({
+    nodeId,
+    crop: cropData.crop,
+    name: cropData.location?.name || `${cropData.crop} Plot`,
+    lat: cropData.location?.lat ?? -2.2472,
+    lng: cropData.location?.lng ?? 28.8042,
+  }));
+
+  const [selectedKey, setSelectedKey] = useState(cropEntries[0]?.nodeId || (cropEntries.length > 0 ? cropEntries[0].nodeId : "default"));
+  const [activeLocation, setActiveLocation] = useState(
+    cropEntries[0]
+      ? { lat: cropEntries[0].lat, lng: cropEntries[0].lng, name: `${cropEntries[0].crop} (${cropEntries[0].name})` }
+      : { lat: -2.2472, lng: 28.8042, name: "Lwiro Agro Station, DR Congo" }
+  );
+  const [weather, setWeather] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const [showWeatherMapPicker, setShowWeatherMapPicker] = useState(false);
+
+  // Automatically keep activeLocation synchronized whenever customCrops or selectedKey changes
+  useEffect(() => {
+    if (selectedKey !== "gps" && selectedKey !== "custom") {
+      const found = cropEntries.find(c => c.nodeId === selectedKey);
+      if (found) {
+        setActiveLocation({ lat: found.lat, lng: found.lng, name: `${found.crop} (${found.name})` });
+      } else if (cropEntries.length > 0) {
+        setSelectedKey(cropEntries[0].nodeId);
+        setActiveLocation({ lat: cropEntries[0].lat, lng: cropEntries[0].lng, name: `${cropEntries[0].crop} (${cropEntries[0].name})` });
+      }
+    }
+  }, [customCrops, selectedKey]);
+
+  // Fetch real-time weather from Open-Meteo
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    fetchWeatherForecast(activeLocation.lat, activeLocation.lng)
+      .then(data => {
+        if (active) {
+          setWeather(data);
+          setLoading(false);
+        }
+      })
+      .catch(err => {
+        console.error("Failed to load weather forecast:", err);
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, [activeLocation.lat, activeLocation.lng]);
+
+  const handleSelectCrop = (e) => {
+    const val = e.target.value;
+    setSelectedKey(val);
+    if (val === "gps") {
+      handleUseGps();
+      return;
+    }
+    if (val === "custom_picker") {
+      setShowWeatherMapPicker(true);
+      return;
+    }
+    const found = cropEntries.find(c => c.nodeId === val);
+    if (found) {
+      setActiveLocation({ lat: found.lat, lng: found.lng, name: `${found.crop} (${found.name})` });
+    }
+  };
+
+  const handleUseGps = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser.");
+      return;
+    }
+    setGpsLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setGpsLoading(false);
+        setSelectedKey("gps");
+        const lat = Number(pos.coords.latitude.toFixed(5));
+        const lng = Number(pos.coords.longitude.toFixed(5));
+        const acc = Math.round(pos.coords.accuracy || 0);
+        setActiveLocation({
+          lat,
+          lng,
+          name: `Device Location (${lat.toFixed(3)}°, ${lng.toFixed(3)}° ±${acc}m)`
+        });
+      },
+      (err) => {
+        setGpsLoading(false);
+        alert("GPS Error: " + err.message + ". You can also use 'Pick / Search on Map' to search any city or click on the map.");
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
   const dailySummary = (history || []).slice(-14).map(h => {
     const humKeys = Object.keys(h).filter(k => k.endsWith("_hum"));
     const avgH = humKeys.length ? humKeys.reduce((s, k) => s + (h[k] || 0), 0) / humKeys.length : 0;
@@ -2112,46 +2399,225 @@ function WeatherTab({ history }) {
 
   return (
     <div>
-      <div className="section-heading">Weather Forecast</div>
-      <div className="section-desc">7-day outlook and historical water data for your field</div>
-
-      <div className="weather-strip">
-        {WEATHER_FORECAST.map((d,i)=>(
-          <div key={d.day} className={`weather-day ${i===0?"today":""}`}>
-            <div className="weather-day-name">{d.day}</div>
-            <div className="weather-icon">{d.icon}</div>
-            <div className="weather-temps">{d.high}° / {d.low}°</div>
-            <div className={`weather-rain ${d.rain===0?"none":""}`}>{d.rain>0?`${d.rain}% rain`:"Dry"}</div>
-            <div style={{fontSize:11,color:"var(--blue)",fontWeight:700,marginTop:4}}>💧{d.humidity}%</div>
-            <div style={{fontSize:10,color:"var(--muted)",marginTop:2}}>{d.wind} km/h</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", flexWrap: "wrap", gap: "12px" }}>
+        <div>
+          <div className="section-heading">Live Weather Forecast</div>
+          <div className="section-desc">
+            Real-time hyper-local meteorological forecasts powered by Open-Meteo for your crops
           </div>
-        ))}
-      </div>
+        </div>
 
-      <div className="card" style={{marginBottom:24}}>
-        <div className="card-title">Irrigation Recommendation Based on Forecast</div>
-        <div className="card-sub">Adjust your watering schedule around expected rainfall</div>
-        <div className="alert-strip" style={{marginBottom:0}}>
-          {rainDays.length>0 ? (
-            <div className="alert-card ok">
-              <div className="alert-icon">🌧️</div>
-              <div>
-                <div className="alert-title">Rain expected: hold irrigation on {rainDays.map(d=>d.day).join(", ")}</div>
-                <div className="alert-desc">Over 60% chance of rainfall. Save water and avoid irrigating on these days.</div>
-              </div>
-            </div>
-          ) : (
-            <div className="alert-card warning">
-              <div className="alert-icon">☀️</div>
-              <div>
-                <div className="alert-title">No significant rain forecast this week</div>
-                <div className="alert-desc">Monitor soil humidity closely and irrigate based on sensor readings.</div>
-              </div>
-            </div>
-          )}
+        {/* Location & Crop Dropdown Selector & Map Picker */}
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--muted)" }}>Forecast For:</span>
+            <select
+              value={selectedKey}
+              onChange={handleSelectCrop}
+              style={{
+                padding: "8px 12px",
+                borderRadius: "8px",
+                border: "1.5px solid var(--border)",
+                fontSize: "13px",
+                fontWeight: "600",
+                background: "white",
+                color: "var(--text)",
+                cursor: "pointer",
+                boxShadow: "0 1px 4px rgba(0,0,0,0.04)"
+              }}
+            >
+              {cropEntries.length === 0 && (
+                <option value="default">Default: Lwiro Agro Station</option>
+              )}
+              {cropEntries.map(c => (
+                <option key={c.nodeId} value={c.nodeId}>
+                  {c.crop} - {c.name} ({c.nodeId})
+                </option>
+              ))}
+              {selectedKey === "custom" && (
+                <option value="custom">🗺️ {activeLocation.name}</option>
+              )}
+              <option value="gps">📍 Live Device GPS</option>
+            </select>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowWeatherMapPicker(true)}
+            style={{
+              background: "white",
+              color: "var(--text)",
+              border: "1.5px solid var(--border)",
+              padding: "8px 14px",
+              borderRadius: "8px",
+              fontWeight: "700",
+              fontSize: "12px",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              boxShadow: "0 1px 4px rgba(0,0,0,0.04)"
+            }}
+          >
+            <span>🗺️</span>
+            <span>Pick / Search City</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleUseGps}
+            disabled={gpsLoading}
+            style={{
+              background: "var(--blue-pale)",
+              color: "var(--blue-dark)",
+              border: "1px solid var(--blue-mid)",
+              padding: "8px 14px",
+              borderRadius: "8px",
+              fontWeight: "700",
+              fontSize: "12px",
+              cursor: gpsLoading ? "wait" : "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px"
+            }}
+          >
+            <span>{gpsLoading ? "📡" : "📍"}</span>
+            <span>{gpsLoading ? "Acquiring GPS..." : "Use Current GPS"}</span>
+          </button>
         </div>
       </div>
 
+      {showWeatherMapPicker && (
+        <MapLocationPicker
+          initialLocation={activeLocation}
+          cropName="Weather Location"
+          cropEmoji="⛅"
+          onSave={(loc) => {
+            setSelectedKey("custom");
+            setActiveLocation({ lat: loc.lat, lng: loc.lng, name: loc.name });
+            setShowWeatherMapPicker(false);
+          }}
+          onClose={() => setShowWeatherMapPicker(false)}
+        />
+      )}
+
+      {/* Active Location Banner */}
+      <div style={{
+        background: "white",
+        borderRadius: "12px",
+        padding: "12px 18px",
+        border: "1px solid var(--border)",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: "20px",
+        fontSize: "13px"
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={{ fontSize: "16px" }}>📍</span>
+          <strong>{activeLocation.name}</strong>
+          <span style={{ color: "var(--muted)", fontSize: "12px" }}>
+            ({activeLocation.lat.toFixed(4)}°, {activeLocation.lng.toFixed(4)}°)
+          </span>
+        </div>
+        <span style={{
+          fontSize: "11px",
+          fontWeight: "800",
+          background: "var(--green-pale)",
+          color: "var(--green-dark)",
+          padding: "3px 8px",
+          borderRadius: "6px"
+        }}>
+          LIVE OPEN-METEO FEED
+        </span>
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: "center", padding: "48px 0", color: "var(--muted)", fontSize: "14px" }}>
+          📡 Connecting to satellite meteorology & fetching real-time forecast...
+        </div>
+      ) : weather ? (
+        <>
+          {/* Current Weather Hero Banner */}
+          <div style={{
+            background: "linear-gradient(135deg, #1d9cd3 0%, #1580ae 100%)",
+            borderRadius: "16px",
+            padding: "24px 28px",
+            color: "white",
+            marginBottom: "24px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: "20px",
+            boxShadow: "0 8px 24px rgba(29,156,211,.2)"
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
+              <div style={{ fontSize: "52px" }}>{weather.current.icon}</div>
+              <div>
+                <div style={{ fontSize: "38px", fontWeight: "800", lineHeight: "1" }}>
+                  {weather.current.temp}°C
+                </div>
+                <div style={{ fontSize: "15px", fontWeight: "600", marginTop: "4px", opacity: 0.95 }}>
+                  {weather.current.condition} • Feels like {weather.current.apparentTemp}°C
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: "24px", flexWrap: "wrap" }}>
+              <div style={{ textAlign: "center", background: "rgba(255,255,255,0.15)", padding: "10px 16px", borderRadius: "10px", backdropFilter: "blur(4px)" }}>
+                <div style={{ fontSize: "11px", textTransform: "uppercase", opacity: 0.8, fontWeight: "700" }}>Humidity</div>
+                <div style={{ fontSize: "18px", fontWeight: "800", marginTop: "2px" }}>💧 {weather.current.humidity}%</div>
+              </div>
+              <div style={{ textAlign: "center", background: "rgba(255,255,255,0.15)", padding: "10px 16px", borderRadius: "10px", backdropFilter: "blur(4px)" }}>
+                <div style={{ fontSize: "11px", textTransform: "uppercase", opacity: 0.8, fontWeight: "700" }}>Wind Speed</div>
+                <div style={{ fontSize: "18px", fontWeight: "800", marginTop: "2px" }}>💨 {weather.current.wind} km/h</div>
+              </div>
+              <div style={{ textAlign: "center", background: "rgba(255,255,255,0.15)", padding: "10px 16px", borderRadius: "10px", backdropFilter: "blur(4px)" }}>
+                <div style={{ fontSize: "11px", textTransform: "uppercase", opacity: 0.8, fontWeight: "700" }}>Precipitation</div>
+                <div style={{ fontSize: "18px", fontWeight: "800", marginTop: "2px" }}>🌧️ {weather.current.precipitation} mm</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Real 7-Day Forecast Cards Strip */}
+          <div className="weather-strip">
+            {weather.daily.map((d, i) => (
+              <div key={d.date} className={`weather-day ${i === 0 ? "today" : ""}`}>
+                <div className="weather-day-name">{d.day}</div>
+                <div className="weather-icon">{d.icon}</div>
+                <div className="weather-temps">{d.high}° / {d.low}°</div>
+                <div className={`weather-rain ${d.rain === 0 ? "none" : ""}`}>
+                  {d.rain > 0 ? `${d.rain}% rain` : "Dry"}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--blue)", fontWeight: 700, marginTop: 4 }}>
+                  💧{d.humidity}%
+                </div>
+                <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
+                  {d.wind} km/h
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Intelligent Irrigation Advisory based on Real Weather Forecast */}
+          <div className="card" style={{ marginBottom: 24 }}>
+            <div className="card-title">Forecast-Driven Irrigation Advisory</div>
+            <div className="card-sub">Dynamic recommendations calculated from 7-day upcoming rain data</div>
+            <div className="alert-strip" style={{ marginBottom: 0 }}>
+              <div className={`alert-card ${weather.irrigationAdvice.type === "rain" ? "ok" : weather.irrigationAdvice.type === "heat" ? "warning" : "ok"}`}>
+                <div className="alert-icon">{weather.irrigationAdvice.icon}</div>
+                <div>
+                  <div className="alert-title">{weather.irrigationAdvice.title}</div>
+                  <div className="alert-desc">{weather.irrigationAdvice.desc}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      ) : null}
+
+      {/* Historical Water Summary Chart */}
       <div className="card">
         <div className="card-title">Daily Water History: Recent Activity</div>
         <div className="card-sub">Soil humidity, rainfall received, and irrigation applied</div>
@@ -2161,15 +2627,15 @@ function WeatherTab({ history }) {
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={dailySummary} margin={{top:5,right:10,left:-10,bottom:5}}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--divider)"/>
-              <XAxis dataKey="label" tick={{fontSize:10,fontFamily:"Nunito Sans",fill:"var(--muted)"}}/>
-              <YAxis tick={{fontSize:10,fontFamily:"Nunito Sans",fill:"var(--muted)"}}/>
-              <Tooltip content={<CustomTooltip/>}/>
-              <Legend wrapperStyle={{fontSize:12,fontFamily:"Nunito Sans",fontWeight:600}}/>
-              <Bar dataKey="avg_hum"      name="Avg Soil Humidity (%)"   fill="#1a9c3e" radius={[4,4,0,0]}/>
-              <Bar dataKey="rainfall_mm"  name="Rainfall (mm)"           fill="#1d9cd3" radius={[4,4,0,0]}/>
-              <Bar dataKey="irrigation_l" name="Irrigation Applied (L)"  fill="#f5c518" radius={[4,4,0,0]}/>
+            <BarChart data={dailySummary} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--divider)" />
+              <XAxis dataKey="label" tick={{ fontSize: 10, fontFamily: "Nunito Sans", fill: "var(--muted)" }} />
+              <YAxis tick={{ fontSize: 10, fontFamily: "Nunito Sans", fill: "var(--muted)" }} />
+              <Tooltip content={<CustomTooltip />} />
+              <Legend wrapperStyle={{ fontSize: 12, fontFamily: "Nunito Sans", fontWeight: 600 }} />
+              <Bar dataKey="avg_hum" name="Avg Soil Humidity (%)" fill="#1a9c3e" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="rainfall_mm" name="Rainfall (mm)" fill="#1d9cd3" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="irrigation_l" name="Irrigation Applied (L)" fill="#f5c518" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         )}
@@ -2226,13 +2692,6 @@ function RecommendationsTab({ nodes }) {
     }
   });
 
-  const rainDays = WEATHER_FORECAST.filter(d=>d.rain>=60).length;
-  if (rainDays>=2) {
-    recs.push({ type:"info", icon:"🌧️", title:"Rain forecast : reduce irrigation", node:"All nodes",
-      body:`${rainDays} days of significant rainfall expected. Reduce scheduled irrigation to avoid waterlogging.`,
-      action:"Adjust schedule" });
-  }
-
   return (
     <div>
       <div className="section-heading">Recommendations</div>
@@ -2271,20 +2730,104 @@ export default function MainApp() {
   const [history, setHistory] = useState([]);
   const [lastUpdate, setLast] = useState(new Date());
 
+  const [toast, setToast] = useState(null);
+  const [showApiModal, setShowApiModal] = useState(false);
+  const [apiUrlInput, setApiUrlInput] = useState(() => {
+    return (typeof window !== "undefined" ? localStorage.getItem("fsl_api_url") : "") || (import.meta.env.VITE_API_URL || "");
+  });
+  const [apiTesting, setApiTesting] = useState(false);
+  const [apiTestResult, setApiTestResult] = useState(null);
+  const [isDbConnected, setIsDbConnected] = useState(false);
+
+  const triggerToast = (msg, type = "info") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 5000);
+  };
+
+  // Central crop state loaded strictly from database and user creations
+  const [customCrops, setCustomCrops] = useState(() => {
+    try {
+      const saved = localStorage.getItem("fsl_custom_crops");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const cleaned = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          const isDummy = (
+            v?.notes === "Main field with automated drip line" ||
+            v?.notes === "Greenhouse Alpha - Roma Tomato" ||
+            v?.notes === "High ridge sector B" ||
+            v?.notes === "Drip fed with bio-fertilizer" ||
+            v?.notes === "Main Plot North - Hybrid White Maize" ||
+            v?.variety?.includes("SC627") ||
+            v?.variety?.includes("Roma VF")
+          );
+          if (!isDummy) {
+            cleaned[k] = v;
+          }
+        }
+        return cleaned;
+      }
+      return {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("fsl_custom_crops", JSON.stringify(customCrops));
+    } catch (e) {
+      console.error("Failed to save custom crops:", e);
+    }
+  }, [customCrops]);
+
   useEffect(() => {
     let active = true;
     const poll = async () => {
       try {
-        const [nodesData, histData] = await Promise.all([
+        const [nodesData, histData, cropsData] = await Promise.all([
           getNodes(),
-          getHistory(48)
+          getHistory(48),
+          getCrops()
         ]);
         if (active) {
+          setIsDbConnected(Array.isArray(cropsData) || Array.isArray(nodesData));
           setNodes(Array.isArray(nodesData) ? nodesData : []);
           setHistory(Array.isArray(histData) ? histData : []);
           setLast(new Date());
+
+          // Build customCrops strictly from database rows
+          if (Array.isArray(cropsData)) {
+            setCustomCrops(prev => {
+              const updated = {};
+              for (const c of cropsData) {
+                if (c.node_id) {
+                  updated[c.node_id] = {
+                    crop: c.crop,
+                    planted: c.planted,
+                    notes: c.notes || "",
+                    location: {
+                      lat: c.lat !== null && c.lat !== undefined ? Number(c.lat) : -2.2472,
+                      lng: c.lng !== null && c.lng !== undefined ? Number(c.lng) : 28.8042,
+                      name: c.location_name || "Field Location"
+                    }
+                  };
+                }
+              }
+              // Preserve any newly registered node from current user session that hasn't synced
+              for (const [k, v] of Object.entries(prev)) {
+                if (!updated[k]) {
+                  updated[k] = v;
+                }
+              }
+              return updated;
+            });
+          }
         }
-      } catch(e) { console.error("Poll error:", e); }
+      } catch(e) { 
+        console.error("Poll error:", e);
+        if (active) setIsDbConnected(false);
+      }
     };
     poll();
     const id = setInterval(poll, 5000);
@@ -2315,7 +2858,33 @@ export default function MainApp() {
             <div className="brand-product-sub">Dashboard</div>
           </div>
         </div>
-        <div className="header-right">
+        <div className="header-right" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <button
+            type="button"
+            onClick={() => {
+              setApiTestResult(null);
+              setShowApiModal(true);
+            }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "6px 12px",
+              borderRadius: "20px",
+              border: isDbConnected ? "1.5px solid var(--green)" : "1.5px solid var(--yellow)",
+              background: isDbConnected ? "var(--green-pale)" : "var(--yellow-pale)",
+              color: isDbConnected ? "var(--green-dark)" : "#8a6d05",
+              fontSize: "12px",
+              fontWeight: "700",
+              cursor: "pointer",
+              transition: "all 0.2s"
+            }}
+            title="Configure Cloudflare Worker backend connection"
+          >
+            <span>{isDbConnected ? "🟢" : "⚡"}</span>
+            <span>{isDbConnected ? "Cloudflare D1 Live" : "Connect Database"}</span>
+          </button>
+
           <div className="live-pill">
             <div className="live-dot"/>
             Live
@@ -2335,10 +2904,170 @@ export default function MainApp() {
       <main className="app-main">
         {tab==="dashboard"       && <DashboardTab nodes={nodes} history={history}/>}
         {tab==="history"         && <HistoryTab   nodes={nodes} history={history}/>}
-        {tab==="crops"           && <CropsTab     nodes={nodes}/>}
-        {tab==="weather"         && <WeatherTab history={history}/>}
+        {tab==="crops"           && <CropsTab     nodes={nodes} customCrops={customCrops} setCustomCrops={setCustomCrops} onToast={triggerToast}/>}
+        {tab==="weather"         && <WeatherTab   history={history} nodes={nodes} customCrops={customCrops}/>}
         {tab==="recommendations" && <RecommendationsTab nodes={nodes}/>}
       </main>
+
+      {/* Persistent Toast Notification */}
+      {toast && (
+        <div style={{
+          position: "fixed",
+          bottom: "24px",
+          right: "24px",
+          zIndex: 9999,
+          background: toast.type === "success" ? "#157a30" : toast.type === "warning" ? "#c05621" : "#1e293b",
+          color: "white",
+          padding: "12px 20px",
+          borderRadius: "10px",
+          boxShadow: "0 6px 20px rgba(0,0,0,0.25)",
+          fontSize: "13px",
+          fontWeight: "600",
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+          maxWidth: "420px"
+        }}>
+          <span>{toast.msg}</span>
+          <button 
+            type="button"
+            onClick={() => setToast(null)}
+            style={{ background: "transparent", border: "none", color: "white", cursor: "pointer", fontSize: "16px", marginLeft: "auto" }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Cloudflare Worker Backend Connection Modal */}
+      {showApiModal && (
+        <div style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(13,36,22,0.6)",
+          backdropFilter: "blur(4px)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 10000,
+          padding: "16px"
+        }}>
+          <div style={{
+            background: "white",
+            borderRadius: "16px",
+            padding: "28px",
+            width: "100%",
+            maxWidth: "520px",
+            boxShadow: "0 20px 50px rgba(0,0,0,0.25)"
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontSize: "24px" }}>☁️</span>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: "17px", color: "var(--text)" }}>Cloudflare Backend API Settings</h3>
+                  <div style={{ fontSize: "12px", color: "var(--muted)" }}>Connect frontend to your Cloudflare Worker & D1 Database</div>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setShowApiModal(false)}
+                style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer", color: "var(--muted)" }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ marginBottom: "16px" }}>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: "700", marginBottom: "6px", color: "var(--text)" }}>
+                Cloudflare Worker URL
+              </label>
+              <input 
+                type="url"
+                value={apiUrlInput}
+                onChange={(e) => setApiUrlInput(e.target.value)}
+                placeholder="https://future-solutions-api.<your-account>.workers.dev"
+                style={{
+                  width: "100%",
+                  padding: "10px 14px",
+                  borderRadius: "8px",
+                  border: "1.5px solid var(--border)",
+                  fontSize: "13px",
+                  outline: "none",
+                  fontFamily: "monospace"
+                }}
+              />
+              <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px" }}>
+                Leave empty to use the default relative <code>/api</code> proxy.
+              </div>
+            </div>
+
+            {apiTestResult && (
+              <div style={{
+                padding: "10px 14px",
+                borderRadius: "8px",
+                marginBottom: "16px",
+                fontSize: "12px",
+                fontWeight: "600",
+                background: apiTestResult.ok ? "var(--green-pale)" : "var(--red-pale)",
+                color: apiTestResult.ok ? "var(--green-dark)" : "var(--red)",
+                border: `1px solid ${apiTestResult.ok ? "var(--green-mid)" : "#fecaca"}`
+              }}>
+                {apiTestResult.ok 
+                  ? `✅ Connected successfully! Cloudflare Worker is active (Status: ${apiTestResult.data?.status || "OK"}).`
+                  : `❌ Connection failed: ${apiTestResult.error}`
+                }
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                disabled={apiTesting}
+                onClick={async () => {
+                  setApiTesting(true);
+                  setApiTestResult(null);
+                  const res = await testApiConnection(apiUrlInput);
+                  setApiTestResult(res);
+                  setApiTesting(false);
+                }}
+                style={{
+                  padding: "9px 16px",
+                  borderRadius: "8px",
+                  border: "1.5px solid var(--border)",
+                  background: "white",
+                  fontSize: "13px",
+                  fontWeight: "700",
+                  cursor: apiTesting ? "wait" : "pointer"
+                }}
+              >
+                {apiTesting ? "Testing..." : "Test Connection"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setApiBaseUrl(apiUrlInput);
+                  setShowApiModal(false);
+                  triggerToast("✅ Backend API URL saved! Re-syncing with database...", "success");
+                  setTimeout(() => window.location.reload(), 800);
+                }}
+                style={{
+                  padding: "9px 18px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: "var(--green)",
+                  color: "white",
+                  fontSize: "13px",
+                  fontWeight: "700",
+                  cursor: "pointer"
+                }}
+              >
+                Save & Connect
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <footer className="brand-footer">
         <div className="footer-brand">
