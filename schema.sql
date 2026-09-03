@@ -18,7 +18,11 @@ CREATE TABLE IF NOT EXISTS crops (
   node_id TEXT,
   crop TEXT NOT NULL,
   planted TEXT,
-  area_ha REAL DEFAULT 0
+  area_ha REAL DEFAULT 0,
+  lat REAL,
+  lng REAL,
+  location_name TEXT,
+  notes TEXT
 );
 
 CREATE TABLE IF NOT EXISTS nodes (
@@ -66,3 +70,8 @@ CREATE TABLE IF NOT EXISTS api_keys (
 -- Default initial API Key for devices (can be managed or overridden via environment variable)
 INSERT OR IGNORE INTO api_keys (id, key, name, role) 
 VALUES (1, 'fsl_live_7a9f8b2c4e1d6a0e', 'Default Farm Ingest Key', 'device');
+
+-- Default Farm Seed
+INSERT OR IGNORE INTO farms (id, name, location, size_ha, phone, joined, status) 
+VALUES ('FSL-001', 'Future Solutions Farm', 'Bukavu, DR Congo', 5.0, '+243 000 000 000', '2026-01-01', 'active');
+
