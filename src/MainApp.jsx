@@ -1586,53 +1586,6 @@ const CROP_EMOJIS = {
   Other: "🌱",
 };
 
-const DEFAULT_CROPS = {
-  NODE_01: {
-    crop: "Maize",
-    variety: "Hybrid SC627 - Plot Alpha",
-    planted: "2026-06-10",
-    notes: "Main field with automated drip line",
-    location: {
-      lat: -2.2472,
-      lng: 28.8042,
-      name: "Lwiro Agro Station, DR Congo",
-    },
-  },
-  NODE_02: {
-    crop: "Tomato",
-    variety: "Roma VF - Greenhouse Bed",
-    planted: "2026-07-01",
-    notes: "Trellised bed with organic mulch",
-    location: {
-      lat: -2.2490,
-      lng: 28.8065,
-      name: "Lwiro East Nursery, DR Congo",
-    },
-  },
-  NODE_03: {
-    crop: "Cassava",
-    variety: "Sawatsawa Drought-Tolerant",
-    planted: "2026-03-15",
-    notes: "High ridge sector B",
-    location: {
-      lat: -2.2450,
-      lng: 28.8020,
-      name: "North Ridge Plot, DR Congo",
-    },
-  },
-  NODE_04: {
-    crop: "Pepper",
-    variety: "Habanero Red - Sector C",
-    planted: "2026-06-25",
-    notes: "Drip fed with bio-fertilizer",
-    location: {
-      lat: -2.2485,
-      lng: 28.8055,
-      name: "South Vegetable Sector, DR Congo",
-    },
-  },
-};
-
 const analyzeCropGrowth = (cropName, plantingDate, nodeHumidity, nodeTemp) => {
   if (!cropName || !plantingDate) return null;
   
@@ -1864,11 +1817,8 @@ function CropsTab({ nodes, customCrops, setCustomCrops }) {
     );
   }
 
-  // Aggregate all displayable nodes (from API + custom entries)
-  const displayedNodeIds = Array.from(new Set([
-    ...(nodes || []).map(n => n.node_id),
-    ...Object.keys(customCrops || {})
-  ]));
+  // Only display crops that exist in database (customCrops)
+  const displayedNodeIds = Object.keys(customCrops || {});
 
   const activeCropsList = displayedNodeIds
     .map(id => {
@@ -2071,164 +2021,193 @@ function CropsTab({ nodes, customCrops, setCustomCrops }) {
         </div>
       )}
 
-      {/* Abstracted Aesthetic Crop Cards Grid */}
-      <div className="crop-grid">
-        {activeCropsList.map(({ node, cropData }) => {
-          const col = NODE_COLORS[node.node_id] || "#1a9c3e";
-          const ageDays = daysSince(cropData.planted);
-          const emoji = CROP_EMOJIS[cropData.crop] || "🌱";
-          const analysis = analyzeCropGrowth(
-            cropData.crop,
-            cropData.planted,
-            node.sensor_json?.humidity || 50,
-            node.sensor_json?.temp_c || 25
-          );
+      {/* Abstracted Aesthetic Crop Cards Grid or Empty State */}
+      {activeCropsList.length === 0 ? (
+        <div className="card" style={{ textAlign: "center", padding: "50px 24px", marginBottom: "24px" }}>
+          <div style={{ fontSize: 38, marginBottom: 12 }}>🌱</div>
+          <div style={{ fontFamily: "Nunito,sans-serif", fontWeight: 800, fontSize: 17, color: "var(--text)" }}>
+            No crops registered in database yet
+          </div>
+          <div style={{ fontSize: 13, color: "var(--muted)", maxWidth: 480, margin: "8px auto 20px", lineHeight: 1.5 }}>
+            Only verified crops and locations saved in your database will appear here. Click "Add Crop Node" above to register your first sensor node, crop type, and map location.
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowAddNode(true)}
+            style={{
+              background: "linear-gradient(135deg, #1a9c3e 0%, #157a30 100%)",
+              color: "white",
+              border: "none",
+              padding: "10px 24px",
+              borderRadius: "8px",
+              fontWeight: "700",
+              fontSize: "13px",
+              cursor: "pointer",
+              boxShadow: "0 2px 8px rgba(26,156,62,.25)",
+            }}
+          >
+            + Register First Crop Node
+          </button>
+        </div>
+      ) : (
+        <div className="crop-grid">
+          {activeCropsList.map(({ node, cropData }) => {
+            const col = NODE_COLORS[node.node_id] || "#1a9c3e";
+            const ageDays = daysSince(cropData.planted);
+            const emoji = CROP_EMOJIS[cropData.crop] || "🌱";
+            const analysis = analyzeCropGrowth(
+              cropData.crop,
+              cropData.planted,
+              node.sensor_json?.humidity || 50,
+              node.sensor_json?.temp_c || 25
+            );
 
-          return (
-            <div 
-              key={node.node_id} 
-              className="crop-card-aesthetic"
-              onClick={() => setSelectedCropNodeId(node.node_id)}
-            >
-              <div className="crop-top-bar" style={{ background: col }} />
+            return (
+              <div 
+                key={node.node_id} 
+                className="crop-card-aesthetic"
+                onClick={() => setSelectedCropNodeId(node.node_id)}
+              >
+                <div className="crop-top-bar" style={{ background: col }} />
 
-              {/* Card Header: Node ID and Status Pill */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", marginTop: "4px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span style={{ fontWeight: "800", fontSize: "14px", color: "var(--text)" }}>
-                    {node.node_id}
+                {/* Card Header: Node ID and Status Pill */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", marginTop: "4px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ fontWeight: "800", fontSize: "14px", color: "var(--text)" }}>
+                      {node.node_id}
+                    </span>
+                  </div>
+                  <span className={`node-badge ${node.active ? "online" : "offline"}`}>
+                    {node.active ? "ACTIVE" : "OFFLINE"}
                   </span>
                 </div>
-                <span className={`node-badge ${node.active ? "online" : "offline"}`}>
-                  {node.active ? "ACTIVE" : "OFFLINE"}
-                </span>
-              </div>
 
-              {/* Crop Hero Identity */}
-              <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
+                {/* Crop Hero Identity */}
+                <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
+                  <div style={{
+                    width: "48px",
+                    height: "48px",
+                    borderRadius: "12px",
+                    background: "var(--green-pale)",
+                    border: "1px solid var(--green-mid)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "26px",
+                    flexShrink: 0
+                  }}>
+                    {emoji}
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: "17px", fontWeight: "800", color: "var(--text)", lineHeight: "1.2" }}>
+                      {cropData.crop}
+                    </div>
+                    <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "2px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {cropData.notes || `Planted ${ageDays ?? 0} days ago`}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Location Badge */}
                 <div style={{
-                  width: "48px",
-                  height: "48px",
-                  borderRadius: "12px",
-                  background: "var(--green-pale)",
-                  border: "1px solid var(--green-mid)",
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: "26px",
-                  flexShrink: 0
-                }}>
-                  {emoji}
-                </div>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: "17px", fontWeight: "800", color: "var(--text)", lineHeight: "1.2" }}>
-                    {cropData.crop}
-                  </div>
-                  <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "2px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {cropData.notes || `Planted ${ageDays ?? 0} days ago`}
-                  </div>
-                </div>
-              </div>
-
-              {/* Location Badge */}
-              <div style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                background: "var(--bg)",
-                padding: "6px 10px",
-                borderRadius: "8px",
-                fontSize: "11px",
-                color: "var(--muted)",
-                marginBottom: "14px"
-              }}>
-                <span>📍</span>
-                <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontWeight: "600" }}>
-                  {cropData.location?.name || "Lwiro Agro Station"}
-                </span>
-              </div>
-
-              {/* Compact Sensor Telemetry Vitals */}
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr 1fr",
-                gap: "8px",
-                background: "var(--bg)",
-                padding: "10px",
-                borderRadius: "10px",
-                textAlign: "center",
-                marginBottom: "14px"
-              }}>
-                <div>
-                  <div style={{ fontSize: "9px", color: "var(--muted)", fontWeight: "700", textTransform: "uppercase" }}>Moisture</div>
-                  <div style={{ fontSize: "14px", fontWeight: "800", color: "var(--green)", marginTop: "2px" }}>
-                    {node.sensor_json?.humidity !== undefined ? `${node.sensor_json.humidity.toFixed(0)}%` : "--"}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: "9px", color: "var(--muted)", fontWeight: "700", textTransform: "uppercase" }}>Temp</div>
-                  <div style={{ fontSize: "14px", fontWeight: "800", color: "var(--blue)", marginTop: "2px" }}>
-                    {node.sensor_json?.temp_c !== undefined ? `${node.sensor_json.temp_c.toFixed(0)}°C` : "--"}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: "9px", color: "var(--muted)", fontWeight: "700", textTransform: "uppercase" }}>EC</div>
-                  <div style={{ fontSize: "14px", fontWeight: "800", color: "var(--text)", marginTop: "2px" }}>
-                    {node.sensor_json?.ec !== undefined ? node.sensor_json.ec.toFixed(1) : "--"}
-                  </div>
-                </div>
-              </div>
-
-              {/* Sleek Stage Progress Bar */}
-              {analysis && (
-                <div style={{ marginBottom: "14px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: "700", marginBottom: "4px" }}>
-                    <span style={{ color: "var(--green-dark)" }}>{analysis.currentStage?.icon} {analysis.currentStage?.name}</span>
-                    <span style={{ color: "var(--muted)" }}>{analysis.progressPercent}%</span>
-                  </div>
-                  <div style={{ height: "6px", background: "var(--divider)", borderRadius: "3px", overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: `${analysis.progressPercent}%`, background: "var(--green)", borderRadius: "3px" }} />
-                  </div>
-                </div>
-              )}
-
-              {/* Bottom Row: Harvest Countdown & Click Action */}
-              <div style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                paddingTop: "12px",
-                borderTop: "1px solid var(--divider)"
-              }}>
-                <span style={{
+                  gap: "6px",
+                  background: "var(--bg)",
+                  padding: "6px 10px",
+                  borderRadius: "8px",
                   fontSize: "11px",
-                  fontWeight: "700",
-                  color: analysis?.daysUntilHarvest < 14 ? "#a37a00" : "var(--muted)",
-                  background: analysis?.daysUntilHarvest < 14 ? "var(--yellow-pale)" : "transparent",
-                  padding: analysis?.daysUntilHarvest < 14 ? "2px 6px" : "0",
-                  borderRadius: "4px"
+                  color: "var(--muted)",
+                  marginBottom: "14px"
                 }}>
-                  {analysis?.daysUntilHarvest === 0
-                    ? "🌾 Harvest today"
-                    : `⏰ ${analysis?.daysUntilHarvest || 0}d left`}
-                </span>
+                  <span>📍</span>
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontWeight: "600" }}>
+                    {cropData.location?.name || "Field Location"}
+                  </span>
+                </div>
 
-                <span style={{
-                  fontSize: "12px",
-                  fontWeight: "800",
-                  color: "var(--green-dark)",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "4px"
+                {/* Compact Sensor Telemetry Vitals */}
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr 1fr",
+                  gap: "8px",
+                  background: "var(--bg)",
+                  padding: "10px",
+                  borderRadius: "10px",
+                  textAlign: "center",
+                  marginBottom: "14px"
                 }}>
-                  <span>View Details</span>
-                  <span className="view-cta-arrow">→</span>
-                </span>
+                  <div>
+                    <div style={{ fontSize: "9px", color: "var(--muted)", fontWeight: "700", textTransform: "uppercase" }}>Moisture</div>
+                    <div style={{ fontSize: "14px", fontWeight: "800", color: "var(--green)", marginTop: "2px" }}>
+                      {node.sensor_json?.humidity !== undefined ? `${node.sensor_json.humidity.toFixed(0)}%` : "--"}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "9px", color: "var(--muted)", fontWeight: "700", textTransform: "uppercase" }}>Temp</div>
+                    <div style={{ fontSize: "14px", fontWeight: "800", color: "var(--blue)", marginTop: "2px" }}>
+                      {node.sensor_json?.temp_c !== undefined ? `${node.sensor_json.temp_c.toFixed(0)}°C` : "--"}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "9px", color: "var(--muted)", fontWeight: "700", textTransform: "uppercase" }}>EC</div>
+                    <div style={{ fontSize: "14px", fontWeight: "800", color: "var(--text)", marginTop: "2px" }}>
+                      {node.sensor_json?.ec !== undefined ? node.sensor_json.ec.toFixed(1) : "--"}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sleek Stage Progress Bar */}
+                {analysis && (
+                  <div style={{ marginBottom: "14px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: "700", marginBottom: "4px" }}>
+                      <span style={{ color: "var(--green-dark)" }}>{analysis.currentStage?.icon} {analysis.currentStage?.name}</span>
+                      <span style={{ color: "var(--muted)" }}>{analysis.progressPercent}%</span>
+                    </div>
+                    <div style={{ height: "6px", background: "var(--divider)", borderRadius: "3px", overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${analysis.progressPercent}%`, background: "var(--green)", borderRadius: "3px" }} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Bottom Row: Harvest Countdown & Click Action */}
+                <div style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  paddingTop: "12px",
+                  borderTop: "1px solid var(--divider)"
+                }}>
+                  <span style={{
+                    fontSize: "11px",
+                    fontWeight: "700",
+                    color: analysis?.daysUntilHarvest < 14 ? "#a37a00" : "var(--muted)",
+                    background: analysis?.daysUntilHarvest < 14 ? "var(--yellow-pale)" : "transparent",
+                    padding: analysis?.daysUntilHarvest < 14 ? "2px 6px" : "0",
+                    borderRadius: "4px"
+                  }}>
+                    {analysis?.daysUntilHarvest === 0
+                      ? "🌾 Harvest today"
+                      : `⏰ ${analysis?.daysUntilHarvest || 0}d left`}
+                  </span>
+
+                  <span style={{
+                    fontSize: "12px",
+                    fontWeight: "800",
+                    color: "var(--green-dark)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px"
+                  }}>
+                    <span>View Details</span>
+                    <span className="view-cta-arrow">→</span>
+                  </span>
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Field Summary Dashboard */}
       <div style={{ marginTop: "32px", padding: "24px", background: "var(--surface)", borderRadius: "14px", border: "1px solid var(--border)" }}>
@@ -2316,7 +2295,7 @@ function WeatherTab({ history, nodes, customCrops }) {
     lng: cropData.location?.lng ?? 28.8042,
   }));
 
-  const [selectedKey, setSelectedKey] = useState(cropEntries[0]?.nodeId || "default");
+  const [selectedKey, setSelectedKey] = useState(cropEntries[0]?.nodeId || (cropEntries.length > 0 ? cropEntries[0].nodeId : "default"));
   const [activeLocation, setActiveLocation] = useState(
     cropEntries[0]
       ? { lat: cropEntries[0].lat, lng: cropEntries[0].lng, name: `${cropEntries[0].crop} (${cropEntries[0].name})` }
@@ -2325,6 +2304,20 @@ function WeatherTab({ history, nodes, customCrops }) {
   const [weather, setWeather] = useState(null);
   const [loading, setLoading] = useState(true);
   const [gpsLoading, setGpsLoading] = useState(false);
+  const [showWeatherMapPicker, setShowWeatherMapPicker] = useState(false);
+
+  // Automatically keep activeLocation synchronized whenever customCrops or selectedKey changes
+  useEffect(() => {
+    if (selectedKey !== "gps" && selectedKey !== "custom") {
+      const found = cropEntries.find(c => c.nodeId === selectedKey);
+      if (found) {
+        setActiveLocation({ lat: found.lat, lng: found.lng, name: `${found.crop} (${found.name})` });
+      } else if (cropEntries.length > 0) {
+        setSelectedKey(cropEntries[0].nodeId);
+        setActiveLocation({ lat: cropEntries[0].lat, lng: cropEntries[0].lng, name: `${cropEntries[0].crop} (${cropEntries[0].name})` });
+      }
+    }
+  }, [customCrops, selectedKey]);
 
   // Fetch real-time weather from Open-Meteo
   useEffect(() => {
@@ -2351,6 +2344,10 @@ function WeatherTab({ history, nodes, customCrops }) {
       handleUseGps();
       return;
     }
+    if (val === "custom_picker") {
+      setShowWeatherMapPicker(true);
+      return;
+    }
     const found = cropEntries.find(c => c.nodeId === val);
     if (found) {
       setActiveLocation({ lat: found.lat, lng: found.lng, name: `${found.crop} (${found.name})` });
@@ -2367,15 +2364,18 @@ function WeatherTab({ history, nodes, customCrops }) {
       (pos) => {
         setGpsLoading(false);
         setSelectedKey("gps");
+        const lat = Number(pos.coords.latitude.toFixed(5));
+        const lng = Number(pos.coords.longitude.toFixed(5));
+        const acc = Math.round(pos.coords.accuracy || 0);
         setActiveLocation({
-          lat: Number(pos.coords.latitude.toFixed(5)),
-          lng: Number(pos.coords.longitude.toFixed(5)),
-          name: `Current Device GPS (${pos.coords.latitude.toFixed(3)}°, ${pos.coords.longitude.toFixed(3)}°)`
+          lat,
+          lng,
+          name: `Device Location (${lat.toFixed(3)}°, ${lng.toFixed(3)}° ±${acc}m)`
         });
       },
       (err) => {
         setGpsLoading(false);
-        alert("GPS Error: " + err.message);
+        alert("GPS Error: " + err.message + ". You can also use 'Pick / Search on Map' to search any city or click on the map.");
       },
       { enableHighAccuracy: true, timeout: 10000 }
     );
@@ -2402,7 +2402,7 @@ function WeatherTab({ history, nodes, customCrops }) {
           </div>
         </div>
 
-        {/* Location & Crop Dropdown Selector */}
+        {/* Location & Crop Dropdown Selector & Map Picker */}
         <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
             <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--muted)" }}>Forecast For:</span>
@@ -2421,14 +2421,42 @@ function WeatherTab({ history, nodes, customCrops }) {
                 boxShadow: "0 1px 4px rgba(0,0,0,0.04)"
               }}
             >
+              {cropEntries.length === 0 && (
+                <option value="default">Default: Lwiro Agro Station</option>
+              )}
               {cropEntries.map(c => (
                 <option key={c.nodeId} value={c.nodeId}>
                   {c.crop} - {c.name} ({c.nodeId})
                 </option>
               ))}
-              <option value="gps">📍 Live Device GPS Location</option>
+              {selectedKey === "custom" && (
+                <option value="custom">🗺️ {activeLocation.name}</option>
+              )}
+              <option value="gps">📍 Live Device GPS</option>
             </select>
           </div>
+
+          <button
+            type="button"
+            onClick={() => setShowWeatherMapPicker(true)}
+            style={{
+              background: "white",
+              color: "var(--text)",
+              border: "1.5px solid var(--border)",
+              padding: "8px 14px",
+              borderRadius: "8px",
+              fontWeight: "700",
+              fontSize: "12px",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              boxShadow: "0 1px 4px rgba(0,0,0,0.04)"
+            }}
+          >
+            <span>🗺️</span>
+            <span>Pick / Search City</span>
+          </button>
 
           <button
             type="button"
@@ -2453,6 +2481,20 @@ function WeatherTab({ history, nodes, customCrops }) {
           </button>
         </div>
       </div>
+
+      {showWeatherMapPicker && (
+        <MapLocationPicker
+          initialLocation={activeLocation}
+          cropName="Weather Location"
+          cropEmoji="⛅"
+          onSave={(loc) => {
+            setSelectedKey("custom");
+            setActiveLocation({ lat: loc.lat, lng: loc.lng, name: loc.name });
+            setShowWeatherMapPicker(false);
+          }}
+          onClose={() => setShowWeatherMapPicker(false)}
+        />
+      )}
 
       {/* Active Location Banner */}
       <div style={{
@@ -2683,17 +2725,32 @@ export default function MainApp() {
   const [history, setHistory] = useState([]);
   const [lastUpdate, setLast] = useState(new Date());
 
-  // Central crop state with persistent localStorage and realistic defaults
+  // Central crop state loaded strictly from database and user creations
   const [customCrops, setCustomCrops] = useState(() => {
     try {
       const saved = localStorage.getItem("fsl_custom_crops");
       if (saved) {
         const parsed = JSON.parse(saved);
-        return { ...DEFAULT_CROPS, ...parsed };
+        const cleaned = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          const isDummy = (
+            v?.notes === "Main field with automated drip line" ||
+            v?.notes === "Greenhouse Alpha - Roma Tomato" ||
+            v?.notes === "High ridge sector B" ||
+            v?.notes === "Drip fed with bio-fertilizer" ||
+            v?.notes === "Main Plot North - Hybrid White Maize" ||
+            v?.variety?.includes("SC627") ||
+            v?.variety?.includes("Roma VF")
+          );
+          if (!isDummy) {
+            cleaned[k] = v;
+          }
+        }
+        return cleaned;
       }
-      return DEFAULT_CROPS;
+      return {};
     } catch {
-      return DEFAULT_CROPS;
+      return {};
     }
   });
 
@@ -2719,22 +2776,28 @@ export default function MainApp() {
           setHistory(Array.isArray(histData) ? histData : []);
           setLast(new Date());
 
-          // If crops were returned from the database, merge them into customCrops
-          if (Array.isArray(cropsData) && cropsData.length > 0) {
+          // Build customCrops strictly from database rows
+          if (Array.isArray(cropsData)) {
             setCustomCrops(prev => {
-              const updated = { ...prev };
+              const updated = {};
               for (const c of cropsData) {
                 if (c.node_id) {
                   updated[c.node_id] = {
                     crop: c.crop,
                     planted: c.planted,
-                    notes: c.notes || updated[c.node_id]?.notes || "",
+                    notes: c.notes || "",
                     location: {
-                      lat: c.lat !== null && c.lat !== undefined ? c.lat : (updated[c.node_id]?.location?.lat ?? -2.2472),
-                      lng: c.lng !== null && c.lng !== undefined ? c.lng : (updated[c.node_id]?.location?.lng ?? 28.8042),
-                      name: c.location_name || updated[c.node_id]?.location?.name || "Field Location"
+                      lat: c.lat !== null && c.lat !== undefined ? Number(c.lat) : -2.2472,
+                      lng: c.lng !== null && c.lng !== undefined ? Number(c.lng) : 28.8042,
+                      name: c.location_name || "Field Location"
                     }
                   };
+                }
+              }
+              // Preserve any newly registered node from current user session that hasn't synced
+              for (const [k, v] of Object.entries(prev)) {
+                if (!updated[k]) {
+                  updated[k] = v;
                 }
               }
               return updated;
