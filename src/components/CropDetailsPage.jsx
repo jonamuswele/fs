@@ -36,6 +36,12 @@ export default function CropDetailsPage({
   const [isEditingNotes, setIsEditingNotes] = useState(false);
   const [editedNotes, setEditedNotes] = useState(cropData?.notes || "");
   const [editedPlanted, setEditedPlanted] = useState(cropData?.planted || "");
+  const [toastMsg, setToastMsg] = useState(null);
+
+  const showToast = (msg) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 3500);
+  };
 
   const miniMapRef = useRef(null);
   const miniMapInstance = useRef(null);
@@ -103,7 +109,7 @@ export default function CropDetailsPage({
             align-items: center;
             justify-content: center;
           ">
-            <span style="transform: rotate(45deg); font-size: 14px;">${emoji}</span>
+            <span style="transform: rotate(45deg); font-size: 15px;">${emoji}</span>
           </div>
         `,
         iconSize: [30, 30],
@@ -140,6 +146,7 @@ export default function CropDetailsPage({
         location: newLoc,
       });
     }
+    showToast(`✅ Location updated: ${newLoc.name}`);
   };
 
   const handleSaveDetails = () => {
@@ -151,6 +158,7 @@ export default function CropDetailsPage({
       });
     }
     setIsEditingNotes(false);
+    showToast("✅ Crop details saved successfully");
   };
 
   const plantingFormatted = cropData?.planted
@@ -162,7 +170,29 @@ export default function CropDetailsPage({
   const ec = node.sensor_json?.ec;
 
   return (
-    <div style={{ animation: "fadeIn 0.25s ease-out" }}>
+    <div style={{ animation: "fadeIn 0.25s ease-out", position: "relative" }}>
+      {toastMsg && (
+        <div style={{
+          position: "fixed",
+          top: "24px",
+          right: "24px",
+          zIndex: 2000,
+          background: "linear-gradient(135deg, #1a9c3e 0%, #157a30 100%)",
+          color: "white",
+          padding: "12px 22px",
+          borderRadius: "10px",
+          boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
+          fontWeight: "700",
+          fontSize: "14px",
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+          animation: "modalFadeIn 0.2s ease-out",
+        }}>
+          <span>{toastMsg}</span>
+        </div>
+      )}
+
       {/* Top Breadcrumbs & Back Navigation */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
         <button
