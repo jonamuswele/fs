@@ -117,3 +117,41 @@ export async function resetDatabase(target = "readings") {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return await res.json();
 }
+
+export async function getCrops(farmId) {
+  try {
+    const url = farmId ? `${API_BASE}/crops?farm_id=${farmId}` : `${API_BASE}/crops`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.error("Failed to fetch crops:", err);
+    return [];
+  }
+}
+
+export async function saveCrop(cropData) {
+  const res = await fetch(`${API_BASE}/crops`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(cropData),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function registerNode(nodeData) {
+  const res = await fetch(`${API_BASE}/nodes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(nodeData),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `HTTP ${res.status}`);
+  }
+  return await res.json();
+}
